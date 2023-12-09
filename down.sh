@@ -1,1 +1,1 @@
-docker stack remove monitor
+sudo docker stack remove monitor

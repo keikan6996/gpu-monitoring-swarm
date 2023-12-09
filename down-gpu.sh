@@ -1,1 +1,1 @@
-docker stack remove monitor-gpu
+sudo docker stack remove monitor-gpu

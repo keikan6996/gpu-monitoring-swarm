@@ -11,7 +11,7 @@ volumes:
 services:
 
   dcgm_exporter:
-    image: nvcr.io/nvidia/k8s/dcgm-exporter
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:2.4.6-2.6.10-ubuntu20.04
     deploy:
       resources:
         reservations:
