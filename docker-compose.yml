@@ -132,8 +132,6 @@ services:
 
   node-exporter:
     image: stefanprodan/swarmprom-node-exporter:v0.16.0
-    ports:
-      - "9090:9090"
     networks:
       - net
     environment:
