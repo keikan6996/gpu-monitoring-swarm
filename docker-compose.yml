@@ -10,7 +10,6 @@ volumes:
     grafana: {}
     alertmanager: {}
 
-
 configs:
   caddy_config:
     file: ./caddy/Caddyfile
