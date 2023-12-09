@@ -145,7 +145,7 @@
           "expr": "DCGM_FI_DEV_GPU_TEMP{instance=~\"${instance}\", gpu=~\"${gpu}\"}",
           "instant": false,
           "interval": "",
-          "legendFormat": "GPU {{gpu}}",
+          "legendFormat": "GPU {{UUID}}",
           "refId": "A",
           "datasource": {
             "type": "prometheus",
