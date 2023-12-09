@@ -10,6 +10,7 @@ volumes:
     grafana: {}
     alertmanager: {}
 
+
 configs:
   caddy_config:
     file: ./caddy/Caddyfile
@@ -44,22 +45,6 @@ services:
     networks:
       - net
       
-  dockerd-exporter:
-    image: stefanprodan/caddy
-    networks:
-      - net
-    environment:
-      - DOCKER_GWBRIDGE_IP=172.18.0.1
-    configs:
-      - source: dockerd_config
-        target: /etc/caddy/Caddyfile
-    deploy:
-      mode: global
-      resources:
-        limits:
-          memory: 128M
-        reservations:
-          memory: 64M
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.47.2
@@ -82,6 +67,8 @@ services:
 
   grafana:
     image: stefanprodan/swarmprom-grafana:5.3.4
+    ports:
+      - "3000:3000"
     networks:
       - net
     environment:
@@ -146,6 +133,8 @@ services:
 
   node-exporter:
     image: stefanprodan/swarmprom-node-exporter:v0.16.0
+    ports:
+      - "9090:9090"
     networks:
       - net
     environment:
@@ -171,6 +160,8 @@ services:
 
   prometheus:
     image: stefanprodan/swarmprom-prometheus:v2.5.0
+    ports:
+      - "9090:9090"
     networks:
       - net
     command:
@@ -196,34 +187,3 @@ services:
         reservations:
           memory: 128M
 
-  caddy:
-    image: stefanprodan/caddy
-    ports:
-      - "3000:3000"
-      - "9090:9090"
-      - "9093:9093"
-      - "9094:9094"
-    networks:
-      - net
-    environment:
-      - ADMIN_USER=admin
-      - ADMIN_PASSWORD=admin
-    configs:
-      - source: caddy_config
-        target: /etc/caddy/Caddyfile
-    deploy:
-      mode: replicated
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      resources:
-        limits:
-          memory: 128M
-        reservations:
-          memory: 64M
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
-      interval: 5s
-      timeout: 1s
-      retries: 5
