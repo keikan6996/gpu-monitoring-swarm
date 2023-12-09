@@ -83,6 +83,8 @@ services:
       #- GF_SMTP_PASSWORD=${GF_SMTP_PASSWORD}
     volumes:
       - grafana:/var/lib/grafana
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
     deploy:
       mode: replicated
       replicas: 1
@@ -167,6 +169,7 @@ services:
       - '--storage.tsdb.retention=${PROMETHEUS_RETENTION:-24h}'
     volumes:
       - prometheus:/prometheus
+      - ./prometheus:/etc/prometheus
     configs:
       - source: node_rules
         target: /etc/prometheus/swarm_node.rules.yml
