@@ -83,8 +83,8 @@ services:
       #- GF_SMTP_PASSWORD=${GF_SMTP_PASSWORD}
     volumes:
       - grafana:/var/lib/grafana
-      - ./grafana/provisioning/dashboards:/etc/grafana/dashboards
-      - ./grafana/provisioning/datasources:/etc/grafana/datasources
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
     deploy:
       mode: replicated
       replicas: 1
