@@ -1,1 +1,1 @@
-sudo docker stack deploy -c docker-compose-gpu.yml monitor-gpu
+sudo docker stack deploy -c docker-compose.yml monitor
