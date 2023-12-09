@@ -1,158 +1,229 @@
 version: "3.8"
 
 networks:
-  monitor-net-new:
-    #driver: bridge
+  net:
+    driver: overlay
+    attachable: true
 
 volumes:
-    prometheus_data: {}
-    grafana_data: {}
+    prometheus: {}
+    grafana: {}
+    alertmanager: {}
+
+configs:
+  caddy_config:
+    file: ./caddy/Caddyfile
+  dockerd_config:
+    file: ./dockerd-exporter/Caddyfile
+  node_rules:
+    file: ./prometheus/rules/swarm_node.rules.yml
+  task_rules:
+    file: ./prometheus/rules/swarm_task.rules.yml
 
 services:
-
   dcgm_exporter:
-    image: nvcr.io/nvidia/k8s/dcgm-exporter:${DCGM_EXPORTER_IMAGE_TAG}
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:2.4.6-2.6.10-ubuntu20.04
     deploy:
-     resources:
-       reservations:
-         generic_resources:
-           - discrete_resource_spec:
-               kind: 'NVIDIA-GPU'
-               value: 0
+      mode: global
+      restart_policy:
+        condition: none
+      resources:
+        reservations:
+          generic_resources:
+            - discrete_resource_spec:
+                kind: 'NVIDIA-GPU'
+                value: 0
+
     restart: always
     environment:
       - DCGM_EXPORTER_NO_HOSTNAME=1
     cap_add:
       - SYS_ADMIN
     ports:
-      - "${DCGM_EXPORTER_HOST_PORT}:9400"
+      - "9400:9400"
     networks:
-      - monitor-net-new
+      - net
       
-  prometheus:
-    image: prom/prometheus:v2.48.0
-    container_name: prometheus
-    volumes:
-      - ./prometheus:/etc/prometheus
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=200h'
-      - '--web.enable-lifecycle'
-    restart: unless-stopped
-    expose:
-      - 9090
+  dockerd-exporter:
+    image: stefanprodan/caddy
     networks:
-      - monitor-net-new
-    labels:
-      org.label-schema.group: "monitoring"
+      - net
+    environment:
+      - DOCKER_GWBRIDGE_IP=172.18.0.1
+    configs:
+      - source: dockerd_config
+        target: /etc/caddy/Caddyfile
+    deploy:
+      mode: global
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    networks:
+      - net
+    command: -logtostderr -docker_only
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/rootfs:ro
+      - /var/run:/var/run
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    deploy:
+      mode: global
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  grafana:
+    image: stefanprodan/swarmprom-grafana:5.3.4
+    networks:
+      - net
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      #- GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL:-localhost}
+      #- GF_SMTP_ENABLED=${GF_SMTP_ENABLED:-false}
+      #- GF_SMTP_FROM_ADDRESS=${GF_SMTP_FROM_ADDRESS:-grafana@test.com}
+      #- GF_SMTP_FROM_NAME=${GF_SMTP_FROM_NAME:-Grafana}
+      #- GF_SMTP_HOST=${GF_SMTP_HOST:-smtp:25}
+      #- GF_SMTP_USER=${GF_SMTP_USER}
+      #- GF_SMTP_PASSWORD=${GF_SMTP_PASSWORD}
+    volumes:
+      - grafana:/var/lib/grafana
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
 
   alertmanager:
-    image: prom/alertmanager:v0.26.0
-    container_name: alertmanager
-    volumes:
-      - ./alertmanager:/etc/alertmanager
-    command:
-      - '--config.file=/etc/alertmanager/config.yml'
-      - '--storage.path=/alertmanager'
-    restart: unless-stopped
-    expose:
-      - 9093
+    image: stefanprodan/swarmprom-alertmanager:v0.14.0
     networks:
-      - monitor-net-new
-    labels:
-      org.label-schema.group: "monitoring"
+      - net
+    environment:
+      - SLACK_URL=${SLACK_URL:-https://hooks.slack.com/services/TOKEN}
+      - SLACK_CHANNEL=${SLACK_CHANNEL:-general}
+      - SLACK_USER=${SLACK_USER:-alertmanager}
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    volumes:
+      - alertmanager:/alertmanager
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
 
-  nodeexporter:
-    image: prom/node-exporter:v1.7.0
-    container_name: nodeexporter
+  unsee:
+    image: cloudflare/unsee:v0.8.0
+    networks:
+      - net
+    environment:
+      - "ALERTMANAGER_URIS=default:http://alertmanager:9093"
+    deploy:
+      mode: replicated
+      replicas: 1
+
+  node-exporter:
+    image: stefanprodan/swarmprom-node-exporter:v0.16.0
+    networks:
+      - net
+    environment:
+      - NODE_ID={{.Node.ID}}
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/rootfs:ro
+      - /etc/hostname:/etc/nodename
     command:
-      - '--path.procfs=/host/proc'
-      - '--path.rootfs=/rootfs'
       - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
-    restart: unless-stopped
-    expose:
-      - 9100
-    networks:
-      - monitor-net-new
-    labels:
-      org.label-schema.group: "monitoring"
+      - '--path.procfs=/host/proc'
+      - '--collector.textfile.directory=/etc/node-exporter/'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--no-collector.ipvs'
+    deploy:
+      mode: global
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
 
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.47.2
-    container_name: cadvisor
-    privileged: true
-    devices:
-      - /dev/kmsg:/dev/kmsg
+  prometheus:
+    image: stefanprodan/swarmprom-prometheus:v2.5.0
+    networks:
+      - net
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention=${PROMETHEUS_RETENTION:-24h}'
     volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker:/var/lib/docker:ro
-      #- /cgroup:/cgroup:ro #doesn't work on MacOS only for Linux
-    restart: unless-stopped
-    expose:
-      - 8080
-    networks:
-      - monitor-net-new
-    labels:
-      org.label-schema.group: "monitoring"
-
-  grafana:
-    image: grafana/grafana:10.2.2
-    container_name: grafana
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
-      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
-    environment:
-      - GF_SECURITY_ADMIN_USER=${ADMIN_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
-      - GF_USERS_ALLOW_SIGN_UP=false
-    restart: unless-stopped
-    expose:
-      - 3000
-    networks:
-      - monitor-net-new
-    labels:
-      org.label-schema.group: "monitoring"
-
-  pushgateway:
-    image: prom/pushgateway:v1.6.2
-    container_name: pushgateway
-    restart: unless-stopped
-    expose:
-      - 9091
-    networks:
-      - monitor-net-new
-    labels:
-      org.label-schema.group: "monitoring"
+      - prometheus:/prometheus
+    configs:
+      - source: node_rules
+        target: /etc/prometheus/swarm_node.rules.yml
+      - source: task_rules
+        target: /etc/prometheus/swarm_task.rules.yml
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 2048M
+        reservations:
+          memory: 128M
 
   caddy:
-    image: caddy:2.7.5
-    container_name: caddy
+    image: stefanprodan/caddy
     ports:
       - "3000:3000"
-      - "8080:8080"
       - "9090:9090"
       - "9093:9093"
-      - "9091:9091"
-    volumes:
-      - ./caddy:/etc/caddy
-    environment:
-      - ADMIN_USER=${ADMIN_USER:-admin}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
-      - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH:-$2a$14$1l.IozJx7xQRVmlkEQ32OeEEfP5mRxTpbDTCTcXRqn19gXD8YK1pO}
-    restart: unless-stopped
+      - "9094:9094"
     networks:
-      - monitor-net-new
-    labels:
-      org.label-schema.group: "monitoring"
+      - net
+    environment:
+      - ADMIN_USER=admin
+      - ADMIN_PASSWORD=admin
+    configs:
+      - source: caddy_config
+        target: /etc/caddy/Caddyfile
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 5s
+      timeout: 1s
+      retries: 5
